@@ -1,17 +1,21 @@
 import { useState, useMemo } from "react";
 
 const BRAND = "#0D263F";
-const HSL_BLUE = "#007AC9";
 const ACCENT = "#2E7D6B";
 const WARM = "#F5F1EC";
 const RED_SOFT = "#C4584A";
+const AMBER = "#D4A33C";
 
-const ZONES = [
-  { label: "AB", monthly: 73.9, saver: 61.6 },
-  { label: "BC", monthly: 73.9, saver: 61.6 },
-  { label: "ABC", monthly: 98.7, saver: 82.4 },
-  { label: "ABCD", monthly: 121.8, saver: 101.5 },
-];
+// Pyöräedun verovapaa raja: 1 200 €/v työntekijää kohden, edellyttäen että
+// työnantaja ja työntekijä ovat sitoutuneet pyöräedun käyttöönottoon viimeistään
+// 23.4.2025. Yhteinen 3 400 €/v kattoraja työsuhdematkalipun kanssa.
+//
+// Lakimuutos 1.1.2026 alkaen: 24.4.2025 tai myöhemmin sovituissa sopimuksissa
+// pyöräetu on veronalainen luontoisetu käyvän arvon mukaan. Leasing-sopimukset
+// jotka on solmittu ennen 24.4.2025 säilyttävät verovapauden sopimuskauden
+// loppuun, kuitenkin enintään 5 vuotta käyttöönotosta.
+const ANNUAL_BENEFIT_MAX = 1200;
+const ANNUAL_BENEFIT_DEFAULT = 1200;
 
 const SALARY_EXAMPLES = [
   { label: "2 500 €/kk", gross: 2500, marginalTax: 0.30 },
@@ -28,6 +32,10 @@ const EMPLOYEES_MAX = 1000;
 
 function fmt(n) {
   return n.toLocaleString("fi-FI", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmt0(n) {
+  return n.toLocaleString("fi-FI", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
 function AnimBar({ value, max, color, label, delay = 0 }) {
@@ -55,15 +63,15 @@ function AnimBar({ value, max, color, label, delay = 0 }) {
   );
 }
 
-export default function TyomatkaetuLaskelma() {
-  const [zoneIdx, setZoneIdx] = useState(0);
+export default function PyoraetuLaskelma() {
+  // contractType: "old" = sopimus 23.4.2025 mennessä, "new" = 24.4.2025 jälkeen
+  const [contractType, setContractType] = useState("old");
+  const [annualBenefit, setAnnualBenefit] = useState(ANNUAL_BENEFIT_DEFAULT);
   const [salaryIdx, setSalaryIdx] = useState(2);
   const [employees, setEmployees] = useState(30);
-  const [useSaver, setUseSaver] = useState(false);
 
-  const zone = ZONES[zoneIdx];
   const salary = SALARY_EXAMPLES[salaryIdx];
-  const ticketCost = useSaver ? zone.saver : zone.monthly;
+  const isOld = contractType === "old";
 
   const handleEmployeeInput = (raw) => {
     const num = Number(raw);
@@ -72,32 +80,42 @@ export default function TyomatkaetuLaskelma() {
     setEmployees(clamped);
   };
 
-  const calc = useMemo(() => {
-    const monthlyBenefit = ticketCost;
-    const yearlyBenefit = monthlyBenefit * 12;
+  const handleBenefitInput = (raw) => {
+    const num = Number(raw);
+    if (Number.isNaN(num)) return;
+    const clamped = Math.max(0, Math.min(ANNUAL_BENEFIT_MAX, Math.round(num)));
+    setAnnualBenefit(clamped);
+  };
 
-    // As salary increase
+  const calc = useMemo(() => {
+    const monthlyBenefit = annualBenefit / 12;
+    const yearlyBenefit = annualBenefit;
+
+    // Palkankorotus aina sama: brutto + sivukulut, työntekijä saa nettoa
     const employerCostSalary = monthlyBenefit * (1 + SIVUKULUT_RATE);
     const employeeNetSalary = monthlyBenefit * (1 - salary.marginalTax);
-    const employerCostSalaryYear = employerCostSalary * 12;
-    const employeeNetSalaryYear = employeeNetSalary * 12;
 
-    // As commuter benefit (tax-free, no sivukulut)
-    const employerCostBenefit = monthlyBenefit;
-    const employeeNetBenefit = monthlyBenefit; // tax-free
-    const employerCostBenefitYear = employerCostBenefit * 12;
-    const employeeNetBenefitYear = employeeNetBenefit * 12;
+    // Pyöräetu — riippuu sopimustyypistä
+    let employerCostBenefit, employeeNetBenefit;
+    if (isOld) {
+      // Vanha sopimus: verovapaa 1 200 €/v, ei sivukuluja, ei verotusta työntekijälle
+      employerCostBenefit = monthlyBenefit;
+      employeeNetBenefit = monthlyBenefit;
+    } else {
+      // Uusi sopimus 1.1.2026 alkaen: veronalainen käypä arvo, kuten palkka
+      // Työnantaja maksaa sivukulut etuuden arvosta, työntekijä maksaa marginaaliveron
+      employerCostBenefit = monthlyBenefit * (1 + SIVUKULUT_RATE);
+      employeeNetBenefit = monthlyBenefit * (1 - salary.marginalTax);
+    }
 
-    // Savings
     const employerSavingsMonth = employerCostSalary - employerCostBenefit;
     const employerSavingsYear = employerSavingsMonth * 12;
     const employeeGainMonth = employeeNetBenefit - employeeNetSalary;
     const employeeGainYear = employeeGainMonth * 12;
 
-    // For N employees
     const totalEmployerSavingsYear = employerSavingsYear * employees;
-    const totalCostBenefitYear = employerCostBenefitYear * employees;
-    const totalCostSalaryYear = employerCostSalaryYear * employees;
+    const totalCostBenefitYear = employerCostBenefit * 12 * employees;
+    const totalCostSalaryYear = employerCostSalary * 12 * employees;
 
     return {
       monthlyBenefit, yearlyBenefit,
@@ -105,12 +123,11 @@ export default function TyomatkaetuLaskelma() {
       employerCostBenefit, employeeNetBenefit,
       employerSavingsMonth, employerSavingsYear,
       employeeGainMonth, employeeGainYear,
-      employerCostSalaryYear, employerCostBenefitYear,
       totalEmployerSavingsYear, totalCostBenefitYear, totalCostSalaryYear,
     };
-  }, [ticketCost, salary, employees]);
+  }, [annualBenefit, salary, employees, isOld]);
 
-  const maxBar = Math.max(calc.employerCostSalary, calc.monthlyBenefit);
+  const maxBar = Math.max(calc.employerCostSalary, calc.employerCostBenefit, calc.monthlyBenefit);
 
   return (
     <div style={{
@@ -128,7 +145,7 @@ export default function TyomatkaetuLaskelma() {
         <div style={{
           position: "absolute", top: -30, right: -30,
           width: 140, height: 140, borderRadius: "50%",
-          background: "rgba(0,122,201,0.15)",
+          background: "rgba(46,125,107,0.18)",
         }} />
         <div style={{ position: "relative" }}>
           <div style={{
@@ -136,59 +153,138 @@ export default function TyomatkaetuLaskelma() {
             fontSize: 12, letterSpacing: 2, textTransform: "uppercase",
             color: "rgba(255,255,255,0.55)", marginBottom: 6,
           }}>
-            Verologia × HSL
+            Verologia
           </div>
           <h1 style={{
             fontFamily: "'DM Serif Display', serif",
             fontSize: 26, fontWeight: 400, margin: 0, lineHeight: 1.25,
             color: "#fff",
           }}>
-            Palkankorotus vai työmatkaetu?
+            Palkankorotus vai pyöräetu?
           </h1>
           <p style={{
             fontSize: 14, color: "rgba(255,255,255,0.7)",
             margin: "8px 0 0", lineHeight: 1.5,
           }}>
-            Vertailu: sama euromäärä bruttopalkassa vs. verovapaana työsuhde-etuna
+            Vertailu: sama euromäärä bruttopalkassa vs. pyöräetuna — sopimuksen ajankohdan mukaan
           </p>
         </div>
       </div>
 
       <div style={{ padding: "16px 16px 100px" }}>
 
-        {/* Zone selector */}
+        {/* Contract type toggle */}
         <div style={{ marginBottom: 18 }}>
           <div style={{
             fontSize: 13, fontWeight: 600, textTransform: "uppercase",
             letterSpacing: 1.2, color: "rgba(13,38,63,0.5)", marginBottom: 10,
           }}>
-            HSL-vyöhyke
+            Sopimuksen ajankohta
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            {ZONES.map((z, i) => (
-              <button key={z.label} onClick={() => setZoneIdx(i)} style={{
-                flex: 1, padding: "10px 0", fontSize: 14, fontWeight: 600,
-                border: `2px solid ${i === zoneIdx ? HSL_BLUE : "rgba(13,38,63,0.1)"}`,
-                borderRadius: 10,
-                background: i === zoneIdx ? HSL_BLUE : "#fff",
-                color: i === zoneIdx ? "#fff" : BRAND,
-                cursor: "pointer", fontFamily: "inherit",
-                transition: "all 0.2s",
+            <button onClick={() => setContractType("old")} style={{
+              flex: 1, padding: "12px 8px", fontSize: 13, fontWeight: 600,
+              border: `2px solid ${isOld ? ACCENT : "rgba(13,38,63,0.1)"}`,
+              borderRadius: 10,
+              background: isOld ? ACCENT : "#fff",
+              color: isOld ? "#fff" : BRAND,
+              cursor: "pointer", fontFamily: "inherit", lineHeight: 1.3,
+              transition: "all 0.2s",
+            }}>
+              Sopimus 23.4.2025 mennessä
+              <div style={{
+                fontSize: 10, fontWeight: 400,
+                opacity: isOld ? 0.85 : 0.55,
+                marginTop: 4,
               }}>
-                {z.label}
-              </button>
-            ))}
+                Verovapaa 1 200 €/v
+              </div>
+            </button>
+            <button onClick={() => setContractType("new")} style={{
+              flex: 1, padding: "12px 8px", fontSize: 13, fontWeight: 600,
+              border: `2px solid ${!isOld ? AMBER : "rgba(13,38,63,0.1)"}`,
+              borderRadius: 10,
+              background: !isOld ? AMBER : "#fff",
+              color: !isOld ? "#fff" : BRAND,
+              cursor: "pointer", fontFamily: "inherit", lineHeight: 1.3,
+              transition: "all 0.2s",
+            }}>
+              Sopimus 24.4.2025 jälkeen
+              <div style={{
+                fontSize: 10, fontWeight: 400,
+                opacity: !isOld ? 0.9 : 0.55,
+                marginTop: 4,
+              }}>
+                Veronalainen 1.1.2026 alkaen
+              </div>
+            </button>
           </div>
+        </div>
+
+        {/* Warning banner for new contracts */}
+        {!isOld && (
+          <div style={{
+            background: "rgba(212,163,60,0.12)",
+            border: `1px solid rgba(212,163,60,0.3)`,
+            borderRadius: 10, padding: "12px 14px",
+            marginBottom: 18,
+            fontSize: 12, color: BRAND, lineHeight: 1.5,
+          }}>
+            <strong style={{ color: AMBER }}>Huom.</strong> 1.1.2026 alkaen 24.4.2025 tai myöhemmin sovittu pyöräetu on veronalainen luontoisetu käyvän arvon mukaan. Verotus vastaa palkkaa: työntekijälle marginaalivero, työnantajalle sivukulut. Pyöräetu voi olla edelleen houkutteleva työntekijän hankintaprosessin ja työnantajamielikuvan kannalta, mutta vero-etua ei enää synny.
+          </div>
+        )}
+
+        {/* Annual benefit selector */}
+        <div style={{ marginBottom: 22 }}>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            marginBottom: 10,
+          }}>
+            <div style={{
+              fontSize: 13, fontWeight: 600, textTransform: "uppercase",
+              letterSpacing: 1.2, color: "rgba(13,38,63,0.5)",
+            }}>
+              Pyöräedun arvo / työntekijä / vuosi
+            </div>
+            <input
+              type="number"
+              min={0}
+              max={ANNUAL_BENEFIT_MAX}
+              step={50}
+              value={annualBenefit}
+              onChange={(e) => handleBenefitInput(e.target.value)}
+              style={{
+                width: 100, padding: "6px 10px",
+                fontSize: 14, fontWeight: 700, fontFamily: "inherit",
+                color: BRAND, background: "#fff",
+                border: `1.5px solid rgba(13,38,63,0.15)`,
+                borderRadius: 8, textAlign: "right",
+                outline: "none",
+              }}
+            />
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={ANNUAL_BENEFIT_MAX}
+            step={50}
+            value={annualBenefit}
+            onChange={(e) => setAnnualBenefit(Number(e.target.value))}
+            style={{ width: "100%", accentColor: isOld ? ACCENT : AMBER }}
+          />
           <div style={{
             display: "flex", justifyContent: "space-between",
-            marginTop: 8, fontSize: 12, color: "rgba(13,38,63,0.5)",
+            fontSize: 10, color: "rgba(13,38,63,0.3)",
           }}>
-            <span>30 vrk kausilippu: {fmt(zone.monthly)} €</span>
-            <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-              <input type="checkbox" checked={useSaver} onChange={(e) => setUseSaver(e.target.checked)} />
-              Säästölippu ({fmt(zone.saver)} €)
-            </label>
+            <span>0 €</span><span>300 €</span><span>600 €</span><span>900 €</span><span>1 200 €</span>
           </div>
+          {isOld && (
+            <div style={{
+              fontSize: 11, color: "rgba(13,38,63,0.45)", marginTop: 4,
+            }}>
+              Verovapaa enintään 1 200 €/v. Yhteinen kattoraja työsuhdematkalipun kanssa 3 400 €/v.
+            </div>
+          )}
         </div>
 
         {/* Salary selector */}
@@ -203,9 +299,9 @@ export default function TyomatkaetuLaskelma() {
             {SALARY_EXAMPLES.map((s, i) => (
               <button key={s.gross} onClick={() => setSalaryIdx(i)} style={{
                 padding: "8px 10px", fontSize: 12, fontWeight: 500,
-                border: `1.5px solid ${i === salaryIdx ? ACCENT : "rgba(13,38,63,0.1)"}`,
+                border: `1.5px solid ${i === salaryIdx ? (isOld ? ACCENT : AMBER) : "rgba(13,38,63,0.1)"}`,
                 borderRadius: 8,
-                background: i === salaryIdx ? ACCENT : "#fff",
+                background: i === salaryIdx ? (isOld ? ACCENT : AMBER) : "#fff",
                 color: i === salaryIdx ? "#fff" : BRAND,
                 cursor: "pointer", fontFamily: "inherit",
                 transition: "all 0.2s",
@@ -250,7 +346,7 @@ export default function TyomatkaetuLaskelma() {
             max={EMPLOYEES_MAX}
             value={employees}
             onChange={(e) => setEmployees(Number(e.target.value))}
-            style={{ width: "100%", accentColor: HSL_BLUE }}
+            style={{ width: "100%", accentColor: isOld ? ACCENT : AMBER }}
           />
           <div style={{
             display: "flex", justifyContent: "space-between",
@@ -299,21 +395,23 @@ export default function TyomatkaetuLaskelma() {
           {/* Benefit card */}
           <div style={{
             background: "#fff", borderRadius: 14, padding: 16,
-            border: `2px solid ${ACCENT}`,
-            boxShadow: "0 4px 20px rgba(46,125,107,0.1)",
+            border: `2px solid ${isOld ? ACCENT : AMBER}`,
+            boxShadow: isOld
+              ? "0 4px 20px rgba(46,125,107,0.1)"
+              : "0 4px 20px rgba(212,163,60,0.12)",
           }}>
             <div style={{
               fontSize: 12, fontWeight: 700, textTransform: "uppercase",
-              letterSpacing: 1.5, color: ACCENT, marginBottom: 12,
+              letterSpacing: 1.5, color: isOld ? ACCENT : AMBER, marginBottom: 12,
             }}>
-              Työmatkaetu ✓
+              Pyöräetu {isOld && "✓"}
             </div>
             <div style={{ fontSize: 11, color: "rgba(13,38,63,0.5)", marginBottom: 4 }}>
               Työnantaja maksaa /kk
             </div>
             <div style={{
               fontFamily: "'DM Serif Display', serif",
-              fontSize: 24, color: ACCENT, marginBottom: 12,
+              fontSize: 24, color: isOld ? ACCENT : AMBER, marginBottom: 12,
             }}>
               {fmt(calc.employerCostBenefit)} €
             </div>
@@ -342,7 +440,13 @@ export default function TyomatkaetuLaskelma() {
             Työnantajan kustannus / kuukausi
           </div>
           <AnimBar value={calc.employerCostSalary} max={maxBar} color={RED_SOFT} label="Palkankorotus (brutto + sivukulut 20,5 %)" delay={0.1} />
-          <AnimBar value={calc.employerCostBenefit} max={maxBar} color={ACCENT} label="Työmatkaetu (ei sivukuluja)" delay={0.2} />
+          <AnimBar
+            value={calc.employerCostBenefit}
+            max={maxBar}
+            color={isOld ? ACCENT : AMBER}
+            label={isOld ? "Pyöräetu (ei sivukuluja)" : "Pyöräetu (sivukulut kuten palkka)"}
+            delay={0.2}
+          />
 
           <div style={{
             marginTop: 14, fontSize: 13, fontWeight: 700, textTransform: "uppercase",
@@ -350,8 +454,20 @@ export default function TyomatkaetuLaskelma() {
           }}>
             Työntekijän nettohyöty / kuukausi
           </div>
-          <AnimBar value={calc.employeeNetSalary} max={calc.monthlyBenefit} color={RED_SOFT} label={`Palkankorotus (marginaalivero ${Math.round(salary.marginalTax * 100)} %)`} delay={0.3} />
-          <AnimBar value={calc.employeeNetBenefit} max={calc.monthlyBenefit} color={ACCENT} label="Työmatkaetu (veroton)" delay={0.4} />
+          <AnimBar
+            value={calc.employeeNetSalary}
+            max={calc.monthlyBenefit || 1}
+            color={RED_SOFT}
+            label={`Palkankorotus (marginaalivero ${Math.round(salary.marginalTax * 100)} %)`}
+            delay={0.3}
+          />
+          <AnimBar
+            value={calc.employeeNetBenefit}
+            max={calc.monthlyBenefit || 1}
+            color={isOld ? ACCENT : AMBER}
+            label={isOld ? "Pyöräetu (veroton)" : "Pyöräetu (veronalainen)"}
+            delay={0.4}
+          />
         </div>
 
         {/* Key insight */}
@@ -370,24 +486,24 @@ export default function TyomatkaetuLaskelma() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
             <div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>
-                Työnantaja säästää /kk
+                Työnantaja säästää /v
               </div>
               <div style={{
                 fontFamily: "'DM Serif Display', serif",
-                fontSize: 22, color: "#7FDBBA",
+                fontSize: 22, color: isOld ? "#7FDBBA" : "#E8C97A",
               }}>
-                {fmt(calc.employerSavingsMonth)} €
+                {fmt(calc.employerSavingsYear)} €
               </div>
             </div>
             <div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>
-                Työntekijä hyötyy /kk
+                Työntekijä hyötyy /v
               </div>
               <div style={{
                 fontFamily: "'DM Serif Display', serif",
-                fontSize: 22, color: "#7FDBBA",
+                fontSize: 22, color: isOld ? "#7FDBBA" : "#E8C97A",
               }}>
-                +{fmt(calc.employeeGainMonth)} €
+                +{fmt(calc.employeeGainYear)} €
               </div>
             </div>
           </div>
@@ -397,9 +513,20 @@ export default function TyomatkaetuLaskelma() {
             paddingTop: 14,
             fontSize: 13, color: "rgba(255,255,255,0.8)", lineHeight: 1.6,
           }}>
-            {fmt(calc.monthlyBenefit)} € työmatkaetuna tuottaa työntekijälle <strong style={{ color: "#7FDBBA" }}>
-            {fmt(calc.employeeGainMonth)} € enemmän</strong> kuussa kuin sama summa palkankorotuksena.
-            Samalla työnantaja <strong style={{ color: "#7FDBBA" }}>säästää {fmt(calc.employerSavingsMonth)} €</strong> sivukuluissa.
+            {isOld ? (
+              <>
+                {fmt0(annualBenefit)} € pyöräetuna tuottaa työntekijälle <strong style={{ color: "#7FDBBA" }}>
+                {fmt(calc.employeeGainYear)} € enemmän</strong> vuodessa kuin sama summa palkankorotuksena.
+                Samalla työnantaja <strong style={{ color: "#7FDBBA" }}>säästää {fmt(calc.employerSavingsYear)} €</strong> sivukuluissa.
+              </>
+            ) : (
+              <>
+                <strong style={{ color: "#E8C97A" }}>Veroetua ei synny:</strong> uudessa sopimuksessa pyöräetu verotetaan kuten palkka.
+                Työnantajan ja työntekijän nettoluvut ovat samat kuin vastaava palkankorotus.
+                Pyöräetu voi silti olla mielekäs työntekijälle hankinnan helppouden vuoksi sekä työnantajalle hyvinvointi- ja brändihyötyjen kautta —
+                mutta puhtaasti verotuksellisesti palkankorotus on yhtä tehokas.
+              </>
+            )}
           </div>
         </div>
 
@@ -431,14 +558,15 @@ export default function TyomatkaetuLaskelma() {
               </div>
             </div>
             <div style={{
-              background: "rgba(46,125,107,0.06)", borderRadius: 10, padding: 14,
+              background: isOld ? "rgba(46,125,107,0.06)" : "rgba(212,163,60,0.08)",
+              borderRadius: 10, padding: 14,
             }}>
               <div style={{ fontSize: 11, color: "rgba(13,38,63,0.5)", marginBottom: 4 }}>
-                Työmatkaetu yhteensä
+                Pyöräetu yhteensä
               </div>
               <div style={{
                 fontFamily: "'DM Serif Display', serif",
-                fontSize: 18, color: ACCENT,
+                fontSize: 18, color: isOld ? ACCENT : AMBER,
               }}>
                 {fmt(calc.totalCostBenefitYear)} €
               </div>
@@ -448,14 +576,14 @@ export default function TyomatkaetuLaskelma() {
           <div style={{
             marginTop: 14, textAlign: "center",
             padding: "12px", borderRadius: 10,
-            background: "rgba(46,125,107,0.08)",
+            background: isOld ? "rgba(46,125,107,0.08)" : "rgba(212,163,60,0.10)",
           }}>
             <div style={{ fontSize: 11, color: "rgba(13,38,63,0.5)", marginBottom: 4 }}>
               Työnantajan kokonaissäästö vuodessa
             </div>
             <div style={{
               fontFamily: "'DM Serif Display', serif",
-              fontSize: 26, color: ACCENT, fontWeight: 400,
+              fontSize: 26, color: isOld ? ACCENT : AMBER, fontWeight: 400,
             }}>
               {fmt(calc.totalEmployerSavingsYear)} €
             </div>
@@ -467,7 +595,17 @@ export default function TyomatkaetuLaskelma() {
           fontSize: 10, color: "rgba(13,38,63,0.35)", lineHeight: 1.6,
           padding: "0 4px",
         }}>
-          Laskelma perustuu HSL:n vuoden 2026 hintoihin, työnantajan sivukuluihin 20,5 % (TyEL, sairausvakuutus, työttömyysvakuutus, tapaturmavakuutus, ryhmähenkivakuutus) ja viitteellisiin marginaaliveroasteisiin. Työsuhdematkalippu on verovapaata 3 400 €/v asti. Todelliset verovaikutukset riippuvat yksilön tilanteesta.
+          {isOld ? (
+            <>
+              Vanhassa sopimuksessa pyöräetu on verovapaa enintään 1 200 €/v työntekijää kohden, kun työnantaja ja työntekijä ovat sitoutuneet pyöräedun käyttöönottoon viimeistään 23.4.2025. Polkupyöräedun ja työsuhdematkalipun yhteinen verovapaa kattoraja on 3 400 €/v. Leasing-sopimuksilla ennen 24.4.2025 hankittu etu säilyttää verovapauden sopimuskauden loppuun, kuitenkin enintään 5 vuotta käyttöönotosta.
+            </>
+          ) : (
+            <>
+              1.1.2026 alkaen 24.4.2025 tai myöhemmin sovittu pyöräetu on veronalainen luontoisetu, joka arvostetaan käypään arvoon. Etu lisätään palkkaan ennakonpidätystä varten ja siitä peritään marginaalivero. Työnantaja maksaa sivukulut etuuden arvosta. Verotuksellisesti tilanne vastaa palkankorotusta. Pyöräetu voi silti olla houkutteleva työntekijän hankintaprosessin keventämisen ja työnantajan hyvinvointi- ja vastuullisuusprofiilin kautta.
+            </>
+          )}
+          <br /><br />
+          Sivukulut 20,5 % (TyEL, sairausvakuutus, työttömyysvakuutus, tapaturmavakuutus, ryhmähenkivakuutus). Marginaaliveroasteet ovat viitteellisiä, todelliset verovaikutukset riippuvat yksilön tilanteesta.
           <br /><br />
           Verologia.fi — Työsuhde-etujen koulutus yrityksille
         </div>
