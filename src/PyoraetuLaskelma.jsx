@@ -53,6 +53,8 @@ const sliderCSS = `
   cursor:pointer; border:3px solid #fff; box-shadow:0 2px 6px rgba(13,38,63,.25); }
 .vl-range.amber::-webkit-slider-thumb{ background:${AMBER}; }
 .vl-range.amber::-moz-range-thumb{ background:${AMBER}; }
+
+@media(max-width:600px){ div[style*="minmax(0"]{grid-template-columns:1fr !important} div[style*="minmax(0"]>div{text-align:center !important} }
 `;
 
 function Eyebrow({ children, light = false, color }) {
