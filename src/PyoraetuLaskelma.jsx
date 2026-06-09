@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 
 /* Verologia-laskuri – sivuston design-järjestelmä (Bricolage Grotesque + Inter) */
 const NAVY = "#0D263F";
@@ -54,7 +54,7 @@ const sliderCSS = `
 .vl-range.amber::-webkit-slider-thumb{ background:${AMBER}; }
 .vl-range.amber::-moz-range-thumb{ background:${AMBER}; }
 
-@media(max-width:600px){ div[style*="minmax(0"]{grid-template-columns:1fr !important} div[style*="minmax(0"]>div{text-align:center !important} }
+@media(max-width:760px){ div[style*="minmax(0"]{grid-template-columns:1fr !important} div[style*="minmax(0"]>div{text-align:center !important} }
 `;
 
 function Eyebrow({ children, light = false, color }) {
@@ -145,8 +145,20 @@ const maxBar = Math.max(calc.employerCostSalary, calc.employerCostBenefit, calc.
 const card = { background: WHITE, borderRadius: 12, padding: 18, border: `1px solid ${LINE}`, boxShadow: SHADOW_SM };
 const numInput = { padding: "7px 10px", fontFamily: HEAD, fontSize: 14, fontWeight: 700, color: NAVY, background: WHITE, border: `1.5px solid ${LINE}`, borderRadius: 8, textAlign: "right", outline: "none" };
 
+const rootRef = useRef(null);
+const [narrow, setNarrow] = useState(false);
+useEffect(() => {
+const el = rootRef.current;
+if (!el || typeof ResizeObserver === "undefined") return;
+const ro = new ResizeObserver((entries) => { setNarrow(entries[0].contentRect.width < 560); });
+ro.observe(el);
+return () => ro.disconnect();
+}, []);
+const cols2 = narrow ? "1fr" : "minmax(0,1fr) minmax(0,1fr)";
+const ctr = narrow ? "center" : "left";
+
 return (
-<div style={{ minHeight: "100vh", background: WHITE, fontFamily: BODY, color: INK }}>
+<div ref={rootRef} style={{ minHeight: "100vh", background: WHITE, fontFamily: BODY, color: INK }}>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>{sliderCSS}</style>
@@ -239,7 +251,7 @@ Henkilöstön määrä
 </div>
 
 {/* Comparison cards */}
-<div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 12, marginBottom: 16 }}>
+<div style={{ display: "grid", gridTemplateColumns: cols2, textAlign: ctr, gap: 12, marginBottom: 16 }}>
 <div style={{ ...card, background: SAND, boxShadow: "none" }}>
 <Eyebrow color={MUTED}>Palkankorotus</Eyebrow>
 <div style={{ fontSize: 12, color: MUTED, margin: "14px 0 4px" }}>Työnantaja maksaa /kk</div>
@@ -273,7 +285,7 @@ Henkilöstön määrä
 {/* Summary */}
 <div style={{ background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_2} 100%)`, borderRadius: 12, padding: 22, color: "#fff", marginBottom: 16 }}>
 <Eyebrow light>Yhteenveto</Eyebrow>
-<div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16, margin: "16px 0" }}>
+<div style={{ display: "grid", gridTemplateColumns: cols2, textAlign: ctr, gap: 16, margin: "16px 0" }}>
 <div>
 <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginBottom: 4 }}>Työnantaja säästää /v</div>
 <div style={{ fontFamily: HEAD, fontSize: 23, fontWeight: 800, color: goodSoft, letterSpacing: "-.02em" }}>{fmt(calc.employerSavingsYear)} €</div>
@@ -295,7 +307,7 @@ Henkilöstön määrä
 {/* Scale */}
 <div style={{ ...card, marginBottom: 16 }}>
 <Eyebrow color={MUTED}>Skaalattu: {employees} työntekijää / vuosi</Eyebrow>
-<div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 12, marginTop: 14 }}>
+<div style={{ display: "grid", gridTemplateColumns: cols2, textAlign: ctr, gap: 12, marginTop: 14 }}>
 <div style={{ background: SAND, borderRadius: 10, padding: 14 }}>
 <div style={{ fontSize: 12, color: MUTED, marginBottom: 4 }}>Palkankorotus yhteensä</div>
 <div style={{ fontFamily: HEAD, fontSize: 18, fontWeight: 800, color: RED, letterSpacing: "-.02em" }}>{fmt(calc.totalCostSalaryYear)} €</div>
